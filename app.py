@@ -32,34 +32,39 @@ def process_video():
     }
 
     try:
-        # Increase timeout to 60s to allow ZenRows to solve the Cloudflare challenge
         response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=60)
         
-        # THE MAGIC TRICK: Un-escape the JSON!
-        # This converts "https:\/\/sora..." back into standard "https://sora..." links
+        # THE MAGIC TRICK 2.0: Clean up the messy JSON characters
+        # Fixes hidden slashes
         clean_html = response.text.replace('\\/', '/')
+        # Fixes broken URL parameters (Converts \u0026 back to &)
+        clean_html = clean_html.replace('\\u0026', '&') 
 
         # Step 1: Find ALL links on the page using Regex
         all_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]+)', clean_html)
         
-        # Step 2: ANTI-JUNK FILTER (Block CSS, Javascript, Fonts, and standard Images)
-        bad_stuff = ('.css', '.js', '.woff', '.woff2', '.png', '.jpg', '.jpeg', '.svg', '.map')
+        # Step 2: ANTI-JUNK FILTER (Block CSS, JS, Fonts, and standard Images)
+        bad_stuff = ('.css', '.js', '.woff', '.woff2', '.png', '.jpg', '.jpeg', '.svg', '.map', '.ico')
         clean_links = [link for link in all_links if not link.endswith(bad_stuff) and "_next/static" not in link]
 
-        # Step 3: TARGET THE VIDEO (Look for mp4, m3u8, or OpenAI's hidden file vault)
+        # Step 3: THE "CATCH-ALL" OPENAI FILTER
+        # We stop looking for .mp4. We just look for their raw content servers.
         video_links = []
         for link in clean_links:
-            if '.mp4' in link or '.m3u8' in link or 'files.oaiusercontent.com/file-' in link:
-                video_links.append(link)
+            # Look for OpenAI's specific file storage domains
+            if 'oaiusercontent.com' in link or 'cdn.openai.com' in link:
+                # Make sure it's not just a link back to another Sora webpage
+                if '/p/s_' not in link:
+                    video_links.append(link)
 
         if video_links:
-            # Video URLs with secure access tokens attached are usually the longest strings.
-            # We grab the longest link in the list to ensure it's the full, authorized video.
+            # The video file is ALWAYS the longest URL because it has massive 
+            # security signatures attached to it (e.g. ?sig=12345&se=2026...).
             best_link = max(video_links, key=len)
             return jsonify({"status": "success", "download_url": best_link})
 
-        # If it gets here, it bypassed security but the video link was completely encrypted.
-        return jsonify({"error": "Bypassed successfully, but couldn't find the media file."}), 404
+        # If it gets here, OpenAI completely cloaked the media domain today.
+        return jsonify({"error": "Bypassed successfully, but OpenAI completely cloaked the media domain."}), 404
 
     except Exception as e:
         return jsonify({"error": f"Server Error: {str(e)}"}), 500
