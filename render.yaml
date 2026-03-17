@@ -1,11 +1,7 @@
 services:
   - type: web
-    name: sora-downloader-app
+    name: sora-cleaner-final
     runtime: python
-    buildCommand: |
-      pip install -r requirements.txt
-      playwright install chromium
+    plan: free
+    buildCommand: pip install -r requirements.txt
     startCommand: python app.py
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.10.0
