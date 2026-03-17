@@ -48,9 +48,7 @@ def process_video():
         # 2. BULLETPROOF VIDEO FILTER
         secure_video_links = []
         for link in all_links:
-            # Accept Azure signatures OR raw media files
             if ('sig=' in link and 'se=' in link) or '.mp4' in link or '.m3u8' in link:
-                # Block thumbnails and images
                 if 'thumbnail' not in link.lower() and 'poster' not in link.lower() and '.jpg' not in link.lower() and '.png' not in link.lower():
                     secure_video_links.append(link)
 
@@ -59,32 +57,28 @@ def process_video():
 
         best_link = max(secure_video_links, key=len)
 
-        # 3. DOWNLOAD THE RAW VIDEO
-        raw_filename = f"raw_{uuid.uuid4().hex}.mp4"
+        # 3. DIRECT STREAM TO FFMPEG (Fixes the moov atom text file crash!)
         clean_filename = f"clean_{uuid.uuid4().hex}.mp4"
-        raw_path = os.path.join(TEMP_DIR, raw_filename)
         clean_path = os.path.join(TEMP_DIR, clean_filename)
 
-        vid_req = requests.get(best_link, stream=True)
-        with open(raw_path, 'wb') as f:
-            for chunk in vid_req.iter_content(chunk_size=8192):
-                f.write(chunk)
-
-        # 4. AUTO-TARGETING BLUR (Using Native OS FFmpeg)
-        # Instead of buggy python packages, we call the system directly
         ffmpeg_exe = "ffmpeg"
         
-        probe = subprocess.run(["ffprobe", "-i", raw_path], stderr=subprocess.PIPE, text=True)
+        # Probe the URL directly for dimensions
+        print("DEBUG: Probing video resolution directly from URL...")
+        probe = subprocess.run(["ffprobe", "-i", best_link], stderr=subprocess.PIPE, text=True)
         res_match = re.search(r'Video:.*?\s(\d+)x(\d+)', probe.stderr)
 
         if res_match:
             V_W, V_H = int(res_match.group(1)), int(res_match.group(2))
+            print(f"DEBUG: Resolution detected as {V_W}x{V_H}")
         else:
             V_W, V_H = 1080, 1920 
+            print("DEBUG: Resolution scan failed, defaulting to 1080x1920")
 
         box_w = int(V_W * 0.30)
         box_h = int(V_H * 0.08)
 
+        # The Coordinates Map
         bl_x, bl_y = int(V_W * 0.05), int(V_H * 0.88)
         mr_x, mr_y = int(V_W * 0.65), int(V_H * 0.45)
         tl_x, tl_y = int(V_W * 0.05), int(V_H * 0.05)
@@ -100,22 +94,23 @@ def process_video():
             f"[v3]delogo=x={br_x}:y={br_y}:w={box_w}:h={box_h}:enable='between(t,12,15)'"
         )
 
+        # We pass 'best_link' directly as the input (-i)
         command = [
-            ffmpeg_exe, "-y", "-i", raw_path,
+            ffmpeg_exe, "-y", "-i", best_link,
             "-filter_complex", filter_complex,
             "-c:a", "copy",
             "-preset", "ultrafast",
             clean_path
         ]
 
+        print("DEBUG: Streaming and applying dynamic blur via FFmpeg...")
         subprocess.run(command, check=True)
-        os.remove(raw_path) 
 
-        # 5. SEND TO USER
+        # 4. SEND TO USER
         return jsonify({"status": "success", "download_url": f"/download/{clean_filename}"})
 
     except subprocess.CalledProcessError as e:
-        return jsonify({"error": "Failed to process the video watermark. Server may lack FFmpeg."}), 500
+        return jsonify({"error": "FFmpeg Engine Failed. The video link might be dead or heavily encrypted."}), 500
     except Exception as e:
         return jsonify({"error": f"Server Error: {str(e)}"}), 500
 
