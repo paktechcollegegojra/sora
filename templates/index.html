@@ -1,65 +1,155 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SoraClean - AI Downloader</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <title>SoraClean - Downloader</title>
     <style>
-        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background-color: #0f172a; /* Dark blue background */
+            color: white; 
+            text-align: center; 
+            padding-top: 100px; 
+            margin: 0;
+        }
+        h1 { color: #818cf8; font-size: 3rem; margin-bottom: 10px; }
+        p.subtitle { color: #94a3b8; margin-bottom: 40px; }
+        .container {
+            background-color: #1e293b;
+            padding: 30px;
+            border-radius: 12px;
+            width: 60%;
+            max-width: 800px;
+            margin: 0 auto;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        .input-group { display: flex; gap: 10px; }
+        input { 
+            flex-grow: 1; 
+            padding: 15px; 
+            border-radius: 8px; 
+            border: 1px solid #334155; 
+            background-color: #0f172a;
+            color: white;
+            font-size: 16px; 
+        }
+        button { 
+            padding: 15px 30px; 
+            border-radius: 8px; 
+            border: none; 
+            background-color: #3b82f6; 
+            color: white; 
+            font-size: 16px; 
+            font-weight: bold;
+            cursor: pointer; 
+            transition: background 0.3s;
+        }
+        button:hover { background-color: #2563eb; }
+        button:disabled { background-color: #475569; cursor: not-allowed; }
+        
+        .status-box {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #0f172a;
+            border-radius: 8px;
+            text-align: left;
+            color: #94a3b8;
+            font-size: 14px;
+        }
+        
+        a.download-btn { 
+            display: inline-block; 
+            margin-top: 20px;
+            padding: 15px 30px; 
+            background-color: #10b981; 
+            color: white; 
+            text-decoration: none; 
+            border-radius: 8px; 
+            font-weight: bold; 
+            font-size: 18px;
+        }
+        a.download-btn:hover { background-color: #059669; }
+        .error { color: #ef4444; font-weight: bold; margin-top: 20px;}
     </style>
 </head>
-<body class="bg-slate-900 text-white min-h-screen flex flex-col items-center justify-center p-6">
+<body>
 
-    <div class="max-w-2xl w-full text-center">
-        <h1 class="text-5xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">SoraClean</h1>
-        <p class="text-slate-400 mb-8">Bypass security and download Sora 2 videos instantly.</p>
+    <h1>SoraClean</h1>
+    <p class="subtitle">Bypass security and download Sora 2 videos instantly.</p>
 
-        <div class="glass p-3 rounded-2xl flex gap-2">
-            <input type="text" id="soraUrl" placeholder="Paste Sora link here..." class="flex-1 bg-transparent px-4 outline-none">
-            <button onclick="startDownload()" id="btn" class="bg-blue-600 px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition">Download</button>
+    <div class="container">
+        <div class="input-group">
+            <input type="text" id="urlInput" placeholder="https://sora.chatgpt.com/p/...">
+            <button id="downloadBtn" onclick="processUrl()">Download</button>
         </div>
 
-        <div id="status" class="hidden mt-8 space-y-2 text-left p-6 glass rounded-xl">
-            <p id="step1" class="text-slate-500">○ Bypassing Cloudflare...</p>
-            <p id="step2" class="text-slate-500">○ Extracting Video Link...</p>
-            <p id="step3" class="text-slate-500">○ Removing Watermark (AI)...</p>
+        <div class="status-box" id="statusBox">
+            <div id="step1">○ Bypassing Cloudflare (ZenRows)...</div>
+            <div id="step2">○ Extracting Video Link...</div>
+            <div id="step3">○ Ready for Download.</div>
         </div>
+
+        <div id="result"></div>
     </div>
 
     <script>
-        async function startDownload() {
-            const url = document.getElementById('soraUrl').value;
-            if(!url) return alert("Enter a URL");
+        async function processUrl() {
+            const url = document.getElementById('urlInput').value;
+            const btn = document.getElementById('downloadBtn');
+            const resultDiv = document.getElementById('result');
+            
+            const step1 = document.getElementById('step1');
+            const step2 = document.getElementById('step2');
+            const step3 = document.getElementById('step3');
 
-            document.getElementById('status').classList.remove('hidden');
-            const btn = document.getElementById('btn');
-            btn.disabled = true; btn.innerText = "Working...";
+            if (!url) {
+                alert('Please enter a valid Sora URL');
+                return;
+            }
+
+            // Reset UI
+            btn.innerText = 'Working...';
+            btn.disabled = true;
+            resultDiv.innerHTML = '';
+            step1.style.color = '#3b82f6'; step1.innerText = '● Bypassing Cloudflare... (This takes 15-30 seconds)';
+            step2.style.color = '#94a3b8'; step2.innerText = '○ Searching HTML for video file...';
+            step3.style.color = '#94a3b8'; step3.innerText = '○ Ready.';
 
             try {
-                const res = await fetch('/api/process', {
+                const response = await fetch('/api/process', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({url})
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url: url })
                 });
-                const data = await res.json();
                 
-                if(data.download_url) {
-                    document.getElementById('step1').className = "text-green-400";
-                    document.getElementById('step2').className = "text-green-400";
-                    document.getElementById('step3').className = "text-green-400";
-                    alert("Success! Your video is ready.");
-                    window.location.href = data.download_url;
+                step1.innerText = '✓ Cloudflare Bypassed';
+                step1.style.color = '#10b981';
+                step2.style.color = '#3b82f6'; 
+                step2.innerText = '● Extracting Video Link...';
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    step2.innerText = '✓ Video Link Extracted';
+                    step2.style.color = '#10b981';
+                    step3.innerText = '✓ Ready for Download!';
+                    step3.style.color = '#10b981';
+                    
+                    resultDiv.innerHTML = `<a href="${data.download_url}" target="_blank" class="download-btn">⬇ Download .MP4 File</a>`;
                 } else {
-                    alert("Error: " + data.error);
+                    step2.innerText = '✖ Extraction Failed';
+                    step2.style.color = '#ef4444';
+                    resultDiv.innerHTML = `<p class="error">Error: ${data.error}</p>`;
                 }
-            } catch(e) {
-                alert("Server Connection Failed.");
-            } finally {
-                btn.disabled = false; btn.innerText = "Download";
+            } catch (err) {
+                resultDiv.innerHTML = `<p class="error">Critical Server Error. ZenRows might be down.</p>`;
             }
+
+            btn.innerText = 'Download';
+            btn.disabled = false;
         }
     </script>
+
 </body>
 </html>
