@@ -41,18 +41,21 @@ def process_video():
         # Find ALL links on the page using Regex
         all_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]+)', clean_html)
         
-        # THE AZURE SIGNATURE FILTER:
-        # Secure OpenAI videos ALWAYS have a signature ('sig=') and an expiration time ('se=').
-        # Fonts, CSS, and basic images do not have these security tags.
-        secure_video_links = [link for link in all_links if 'sig=' in link and 'se=' in link]
+        # THE AZURE SIGNATURE FILTER (Now with Thumbnail Blocker!)
+        secure_video_links = []
+        for link in all_links:
+            # 1. Must have Azure security passwords
+            if 'sig=' in link and 'se=' in link:
+                # 2. MUST NOT be the thumbnail, poster, or a standard image file
+                if 'thumbnail' not in link.lower() and 'poster' not in link.lower() and '.jpg' not in link.lower() and '.png' not in link.lower():
+                    secure_video_links.append(link)
 
         if secure_video_links:
-            # The video file will be the longest link because of the massive security tokens.
+            # Now the longest remaining link is guaranteed to be the actual video stream!
             best_link = max(secure_video_links, key=len)
             return jsonify({"status": "success", "download_url": best_link})
 
-        # If it gets here, it bypassed security but couldn't find an Azure signature.
-        return jsonify({"error": "Bypassed successfully, but the secure video signature is missing."}), 404
+        return jsonify({"error": "Bypassed successfully, but couldn't separate the video from the thumbnail."}), 404
 
     except Exception as e:
         return jsonify({"error": f"Server Error: {str(e)}"}), 500
