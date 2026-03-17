@@ -32,39 +32,27 @@ def process_video():
     }
 
     try:
+        # Pushing timeout to 60s to allow ZenRows to solve Cloudflare
         response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=60)
         
-        # THE MAGIC TRICK 2.0: Clean up the messy JSON characters
-        # Fixes hidden slashes
-        clean_html = response.text.replace('\\/', '/')
-        # Fixes broken URL parameters (Converts \u0026 back to &)
-        clean_html = clean_html.replace('\\u0026', '&') 
+        # Un-escape the JSON (fixes hidden slashes and broken parameters)
+        clean_html = response.text.replace('\\/', '/').replace('\\u0026', '&')
 
-        # Step 1: Find ALL links on the page using Regex
+        # Find ALL links on the page using Regex
         all_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]+)', clean_html)
         
-        # Step 2: ANTI-JUNK FILTER (Block CSS, JS, Fonts, and standard Images)
-        bad_stuff = ('.css', '.js', '.woff', '.woff2', '.png', '.jpg', '.jpeg', '.svg', '.map', '.ico')
-        clean_links = [link for link in all_links if not link.endswith(bad_stuff) and "_next/static" not in link]
+        # THE AZURE SIGNATURE FILTER:
+        # Secure OpenAI videos ALWAYS have a signature ('sig=') and an expiration time ('se=').
+        # Fonts, CSS, and basic images do not have these security tags.
+        secure_video_links = [link for link in all_links if 'sig=' in link and 'se=' in link]
 
-        # Step 3: THE "CATCH-ALL" OPENAI FILTER
-        # We stop looking for .mp4. We just look for their raw content servers.
-        video_links = []
-        for link in clean_links:
-            # Look for OpenAI's specific file storage domains
-            if 'oaiusercontent.com' in link or 'cdn.openai.com' in link:
-                # Make sure it's not just a link back to another Sora webpage
-                if '/p/s_' not in link:
-                    video_links.append(link)
-
-        if video_links:
-            # The video file is ALWAYS the longest URL because it has massive 
-            # security signatures attached to it (e.g. ?sig=12345&se=2026...).
-            best_link = max(video_links, key=len)
+        if secure_video_links:
+            # The video file will be the longest link because of the massive security tokens.
+            best_link = max(secure_video_links, key=len)
             return jsonify({"status": "success", "download_url": best_link})
 
-        # If it gets here, OpenAI completely cloaked the media domain today.
-        return jsonify({"error": "Bypassed successfully, but OpenAI completely cloaked the media domain."}), 404
+        # If it gets here, it bypassed security but couldn't find an Azure signature.
+        return jsonify({"error": "Bypassed successfully, but the secure video signature is missing."}), 404
 
     except Exception as e:
         return jsonify({"error": f"Server Error: {str(e)}"}), 500
