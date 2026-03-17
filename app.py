@@ -40,9 +40,9 @@ def process_video():
     }
 
     try:
-        # 1. SCRAPE THE LINKS
+        # 1. SCRAPE & CLEAN THE LINKS (Now scrubs HTML &amp; entities!)
         response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=60)
-        clean_html = response.text.replace('\\/', '/').replace('\\u0026', '&')
+        clean_html = response.text.replace('\\/', '/').replace('\\u0026', '&').replace('&amp;', '&')
         all_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]+)', clean_html)
         
         # 2. BULLETPROOF VIDEO FILTER
@@ -57,13 +57,12 @@ def process_video():
 
         best_link = max(secure_video_links, key=len)
 
-        # 3. DIRECT STREAM TO FFMPEG (Fixes the moov atom text file crash!)
+        # 3. DIRECT STREAM TO FFMPEG
         clean_filename = f"clean_{uuid.uuid4().hex}.mp4"
         clean_path = os.path.join(TEMP_DIR, clean_filename)
 
         ffmpeg_exe = "ffmpeg"
         
-        # Probe the URL directly for dimensions
         print("DEBUG: Probing video resolution directly from URL...")
         probe = subprocess.run(["ffprobe", "-i", best_link], stderr=subprocess.PIPE, text=True)
         res_match = re.search(r'Video:.*?\s(\d+)x(\d+)', probe.stderr)
@@ -94,7 +93,6 @@ def process_video():
             f"[v3]delogo=x={br_x}:y={br_y}:w={box_w}:h={box_h}:enable='between(t,12,15)'"
         )
 
-        # We pass 'best_link' directly as the input (-i)
         command = [
             ffmpeg_exe, "-y", "-i", best_link,
             "-filter_complex", filter_complex,
