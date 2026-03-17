@@ -75,34 +75,54 @@ def process_video():
             for chunk in vid_req.iter_content(chunk_size=8192):
                 f.write(chunk)
 
-        # 4. THE DYNAMIC BLUR (Advanced FFmpeg Filter)
-        print("DEBUG: Applying dynamic blur to moving watermark...")
-        
-        # Get the FFmpeg engine path
+        # 4. THE DYNAMIC BLUR (Auto-Targeting Version)
+        print("DEBUG: Calculating dynamic coordinates...")
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
-        # Box dimensions for the blur (Width=300px, Height=100px)
-        w, h = 300, 100 
+        # BULLETPROOF RESOLUTION SCANNER: Read the video data directly
+        probe = subprocess.run([ffmpeg_exe, "-i", raw_path], stderr=subprocess.PIPE, text=True)
+        res_match = re.search(r'Video:.*?\s(\d+)x(\d+)', probe.stderr)
 
-        # The Timeline Map: Moves the blur box based on the video's seconds (t)
-        # These X and Y coordinates are estimated for a 1080x1920 video
+        if res_match:
+            V_W = int(res_match.group(1))
+            V_H = int(res_match.group(2))
+        else:
+            # Fallback just in case the scanner fails
+            V_W, V_H = 1080, 1920 
+            
+        print(f"DEBUG: Actual Video Resolution detected as {V_W}x{V_H}")
+
+        # Make the blur box scale with the video size (30% width, 8% height to be safe)
+        box_w = int(V_W * 0.30)
+        box_h = int(V_H * 0.08)
+
+        # Calculate exact corner coordinates based on percentages
+        bl_x, bl_y = int(V_W * 0.05), int(V_H * 0.88) # Bottom Left (0-4s)
+        mr_x, mr_y = int(V_W * 0.65), int(V_H * 0.45) # Middle Right (4-8s)
+        tl_x, tl_y = int(V_W * 0.05), int(V_H * 0.05) # Top Left (8-12s)
+        br_x, br_y = int(V_W * 0.65), int(V_H * 0.88) # Bottom Right (12-15s)
+
+        # Ensure FFmpeg doesn't crash by pushing a box outside the video edge
+        mr_x = min(mr_x, V_W - box_w - 2)
+        br_x = min(br_x, V_W - box_w - 2)
+
+        # The Timeline Map
         filter_complex = (
-            f"[0:v]delogo=x=40:y=1750:w={w}:h={h}:enable='between(t,0,4)'[v1];"      # Bottom Left (0-4s)
-            f"[v1]delogo=x=740:y=900:w={w}:h={h}:enable='between(t,4,8)'[v2];"       # Middle Right (4-8s)
-            f"[v2]delogo=x=40:y=40:w={w}:h={h}:enable='between(t,8,12)'[v3];"        # Top Left (8-12s)
-            f"[v3]delogo=x=740:y=1750:w={w}:h={h}:enable='between(t,12,15)'"         # Bottom Right (12-15s)
+            f"[0:v]delogo=x={bl_x}:y={bl_y}:w={box_w}:h={box_h}:enable='between(t,0,4)'[v1];"
+            f"[v1]delogo=x={mr_x}:y={mr_y}:w={box_w}:h={box_h}:enable='between(t,4,8)'[v2];"
+            f"[v2]delogo=x={tl_x}:y={tl_y}:w={box_w}:h={box_h}:enable='between(t,8,12)'[v3];"
+            f"[v3]delogo=x={br_x}:y={br_y}:w={box_w}:h={box_h}:enable='between(t,12,15)'"
         )
 
-        # Build the exact command for the engine
         command = [
             ffmpeg_exe, "-y", "-i", raw_path,
             "-filter_complex", filter_complex,
-            "-c:a", "copy",          # Copy audio instantly to save CPU
-            "-preset", "ultrafast",  # Force the server to work quickly
+            "-c:a", "copy",
+            "-preset", "ultrafast",
             clean_path
         ]
 
-        # Fire the engine!
+        print("DEBUG: Firing FFmpeg engine...")
         subprocess.run(command, check=True)
         
         # Delete the raw video to save hard drive space
