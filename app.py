@@ -1,12 +1,11 @@
 import os
-import time
-import random
-from flask import Flask, render_template, request, jsonify, send_from_directory
-from flask_cors import CORS
-from seleniumbase import SB
+import requests
+from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
-CORS(app)
+
+# Your ZenRows API Key
+ZENROWS_API_KEY = "97a3341face7698dd0dccb24b16e385f0d826033"
 
 @app.route('/')
 def index():
@@ -20,47 +19,35 @@ def process_video():
     if not sora_url:
         return jsonify({"error": "No URL provided"}), 400
 
-    # List of 2026 User Agents to rotate
-    user_agents = [
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-    ]
+    # These are the magic settings you need in 2026 to beat Sora's security
+    params = {
+        'url': sora_url,
+        'apikey': ZENROWS_API_KEY,
+        'js_render': 'true',        # Runs Javascript to load the video player
+        'premium_proxy': 'true',     # Uses a home IP to avoid being blocked
+        'antibot': 'true',           # Automatically solves 'I am human' checks
+        'wait_for': 'video'          # Waits until the video actually appears
+    }
 
-    video_src = ""
-    # UC=True + Incognito=True is the gold standard for 2026 bypass
     try:
-        with SB(uc=True, headless=True, incognito=True, agent=random.choice(user_agents)) as sb:
-            # 1. Use the 'reconnect' strategy which is better for Turnstile
-            sb.uc_open_with_reconnect(sora_url, reconnect_time=7)
-            
-            # 2. Wait for the human check to clear
-            sb.sleep(random.uniform(3.5, 6.2)) 
-            
-            # 3. Attempt to auto-click the 'Verify' button if it appears
-            try:
-                sb.uc_gui_click_captcha()
-            except:
-                pass
-
-            # 4. Specifically wait for the Sora video player to render
-            sb.wait_for_element("video", timeout=20)
-            video_src = sb.get_attribute("video", "src")
-            
-            if not video_src:
-                raise Exception("Video source not found in DOM")
+        # We tell ZenRows to go get the page for us
+        response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=30)
+        html_content = response.text
+        
+        # We look for the video source in the code ZenRows sent back
+        # Sora video links usually start with 'https://' and end with '.mp4'
+        if 'src="' in html_content:
+            # This is a simple way to pull the URL out of the HTML tags
+            parts = html_content.split('src="')
+            for p in parts:
+                if 'https://' in p and '.mp4' in p:
+                    video_url = p.split('"')[0]
+                    return jsonify({"status": "success", "download_url": video_url})
+        
+        return jsonify({"error": "Could not find video. Try a different Sora link."}), 404
 
     except Exception as e:
-        print(f"Bypass Error: {e}")
-        return jsonify({"error": "Security bypass failed. Sora's anti-bot is blocking the server."}), 403
-
-    # Simulation for Logo Removal (Needs GPU for real)
-    time.sleep(3) 
-    
-    return jsonify({
-        "status": "success",
-        "download_url": video_src 
-    })
+        return jsonify({"error": "Connection to ZenRows failed."}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
