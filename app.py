@@ -7,7 +7,7 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
-# Your ZenRows Key
+# Your ZenRows API Key
 ZENROWS_API_KEY = "97a3341face7698dd0dccb24b16e385f0d826033"
 
 @app.route('/')
@@ -21,6 +21,7 @@ def process_video():
     if not sora_url:
         return jsonify({"error": "No URL provided"}), 400
 
+    # ZenRows Bypass Settings
     params = {
         'url': sora_url,
         'apikey': ZENROWS_API_KEY,
@@ -31,27 +32,34 @@ def process_video():
     }
 
     try:
+        # Increase timeout to 60s to allow ZenRows to solve the Cloudflare challenge
         response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=60)
         
         # THE MAGIC TRICK: Un-escape the JSON!
-        # This converts "https:\/\/sora..." back into "https://sora..."
+        # This converts "https:\/\/sora..." back into standard "https://sora..." links
         clean_html = response.text.replace('\\/', '/')
 
-        # COMPETITOR LEVEL SEARCH 1: Hunt for the unhidden .mp4 or .m3u8 files
-        video_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]+\.(?:mp4|m3u8)[^\s"\'<>\[\]\{\}]*)', clean_html)
+        # Step 1: Find ALL links on the page using Regex
+        all_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]+)', clean_html)
         
-        # COMPETITOR LEVEL SEARCH 2: If Sora hid the .mp4 extension, hunt for their specific storage servers
-        if not video_links:
-            video_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]*(?:oaiusercontent|openai-public|sora)[^\s"\'<>\[\]\{\}]*)', clean_html)
+        # Step 2: ANTI-JUNK FILTER (Block CSS, Javascript, Fonts, and standard Images)
+        bad_stuff = ('.css', '.js', '.woff', '.woff2', '.png', '.jpg', '.jpeg', '.svg', '.map')
+        clean_links = [link for link in all_links if not link.endswith(bad_stuff) and "_next/static" not in link]
+
+        # Step 3: TARGET THE VIDEO (Look for mp4, m3u8, or OpenAI's hidden file vault)
+        video_links = []
+        for link in clean_links:
+            if '.mp4' in link or '.m3u8' in link or 'files.oaiusercontent.com/file-' in link:
+                video_links.append(link)
 
         if video_links:
-            # We filter out junk links (like logos) to grab the actual heavy video file
-            best_links = [l for l in video_links if 'video' in l.lower() or 'mp4' in l.lower() or 'oaiusercontent' in l.lower()]
-            final_link = best_links[0] if best_links else video_links[0]
-            
-            return jsonify({"status": "success", "download_url": final_link})
+            # Video URLs with secure access tokens attached are usually the longest strings.
+            # We grab the longest link in the list to ensure it's the full, authorized video.
+            best_link = max(video_links, key=len)
+            return jsonify({"status": "success", "download_url": best_link})
 
-        return jsonify({"error": "Cracked the JSON, but Sora might be using an encrypted stream today."}), 404
+        # If it gets here, it bypassed security but the video link was completely encrypted.
+        return jsonify({"error": "Bypassed successfully, but couldn't find the media file."}), 404
 
     except Exception as e:
         return jsonify({"error": f"Server Error: {str(e)}"}), 500
