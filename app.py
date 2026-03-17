@@ -4,6 +4,7 @@ import re
 import tempfile
 import uuid
 import subprocess
+import html
 from flask import Flask, render_template, request, jsonify, send_file
 from flask_cors import CORS
 
@@ -40,9 +41,9 @@ def process_video():
     }
 
     try:
-        # 1. SCRAPE & CLEAN THE LINKS (Now scrubs HTML &amp; entities!)
+        # 1. SCRAPE THE LINKS
         response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=60)
-        clean_html = response.text.replace('\\/', '/').replace('\\u0026', '&').replace('&amp;', '&')
+        clean_html = response.text.replace('\\/', '/')
         all_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]+)', clean_html)
         
         # 2. BULLETPROOF VIDEO FILTER
@@ -57,14 +58,28 @@ def process_video():
 
         best_link = max(secure_video_links, key=len)
 
+        # THE SLEDGEHAMMER: Aggressively decode the final URL
+        best_link = html.unescape(best_link)
+        while "&amp;" in best_link or "\\u0026" in best_link:
+            best_link = best_link.replace("\\u0026", "&").replace("&amp;", "&")
+        
+        # Strip trailing garbage characters just in case regex grabbed too much
+        best_link = best_link.strip("\\'\"<>[]{}()") 
+        print(f"DEBUG: Cleaned Target URL -> {best_link[:100]}...")
+
         # 3. DIRECT STREAM TO FFMPEG
         clean_filename = f"clean_{uuid.uuid4().hex}.mp4"
         clean_path = os.path.join(TEMP_DIR, clean_filename)
-
         ffmpeg_exe = "ffmpeg"
         
         print("DEBUG: Probing video resolution directly from URL...")
-        probe = subprocess.run(["ffprobe", "-i", best_link], stderr=subprocess.PIPE, text=True)
+        # Add User-Agent to probe as well
+        probe = subprocess.run([
+            "ffprobe", 
+            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "-i", best_link
+        ], stderr=subprocess.PIPE, text=True)
+        
         res_match = re.search(r'Video:.*?\s(\d+)x(\d+)', probe.stderr)
 
         if res_match:
@@ -94,7 +109,9 @@ def process_video():
         )
 
         command = [
-            ffmpeg_exe, "-y", "-i", best_link,
+            ffmpeg_exe, "-y", 
+            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "-i", best_link,
             "-filter_complex", filter_complex,
             "-c:a", "copy",
             "-preset", "ultrafast",
