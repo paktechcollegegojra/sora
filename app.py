@@ -27,28 +27,31 @@ def process_video():
         'js_render': 'true',
         'premium_proxy': 'true',
         'antibot': 'true',
-        'wait': '8000' # Waiting 8 seconds for the JSON to load
+        'wait': '8000' # Wait 8 seconds to ensure the JSON payload fully loads
     }
 
     try:
         response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=60)
-        html = response.text
         
-        # SEARCH 1: Hunt for any video file type (.mp4 or .m3u8)
-        video_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]+\.(?:mp4|m3u8)[^\s"\'<>\[\]\{\}]*)', html)
+        # THE MAGIC TRICK: Un-escape the JSON!
+        # This converts "https:\/\/sora..." back into "https://sora..."
+        clean_html = response.text.replace('\\/', '/')
+
+        # COMPETITOR LEVEL SEARCH 1: Hunt for the unhidden .mp4 or .m3u8 files
+        video_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]+\.(?:mp4|m3u8)[^\s"\'<>\[\]\{\}]*)', clean_html)
         
+        # COMPETITOR LEVEL SEARCH 2: If Sora hid the .mp4 extension, hunt for their specific storage servers
+        if not video_links:
+            video_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]*(?:oaiusercontent|openai-public|sora)[^\s"\'<>\[\]\{\}]*)', clean_html)
+
         if video_links:
-            # We filter to make sure it's an OpenAI/Sora server link
-            best_links = [l for l in video_links if 'openai' in l.lower() or 'sora' in l.lower() or 'oaiusercontent' in l.lower()]
+            # We filter out junk links (like logos) to grab the actual heavy video file
+            best_links = [l for l in video_links if 'video' in l.lower() or 'mp4' in l.lower() or 'oaiusercontent' in l.lower()]
             final_link = best_links[0] if best_links else video_links[0]
+            
             return jsonify({"status": "success", "download_url": final_link})
 
-        # SEARCH 2: The Diagnostic Output (Prints to your screen)
-        char_count = len(html)
-        if char_count < 5000:
-            return jsonify({"error": f"BLOCKED! ZenRows only got {char_count} characters. Cloudflare stopped us."}), 404
-        else:
-            return jsonify({"error": f"INSIDE SORA! We got {char_count} characters of code, but the video link is hidden in JSON."}), 404
+        return jsonify({"error": "Cracked the JSON, but Sora might be using an encrypted stream today."}), 404
 
     except Exception as e:
         return jsonify({"error": f"Server Error: {str(e)}"}), 500
