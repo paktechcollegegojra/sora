@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SoraClean - AI Downloader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+    </style>
+</head>
+<body class="bg-slate-900 text-white min-h-screen flex flex-col items-center justify-center p-6">
+
+    <div class="max-w-2xl w-full text-center">
+        <h1 class="text-5xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-purple-500">SoraClean</h1>
+        <p class="text-slate-400 mb-8">Bypass security and download Sora 2 videos instantly.</p>
+
+        <div class="glass p-3 rounded-2xl flex gap-2">
+            <input type="text" id="soraUrl" placeholder="Paste Sora link here..." class="flex-1 bg-transparent px-4 outline-none">
+            <button onclick="startDownload()" id="btn" class="bg-blue-600 px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition">Download</button>
+        </div>
+
+        <div id="status" class="hidden mt-8 space-y-2 text-left p-6 glass rounded-xl">
+            <p id="step1" class="text-slate-500">○ Bypassing Cloudflare...</p>
+            <p id="step2" class="text-slate-500">○ Extracting Video Link...</p>
+            <p id="step3" class="text-slate-500">○ Removing Watermark (AI)...</p>
+        </div>
+    </div>
+
+    <script>
+        async function startDownload() {
+            const url = document.getElementById('soraUrl').value;
+            if(!url) return alert("Enter a URL");
+
+            document.getElementById('status').classList.remove('hidden');
+            const btn = document.getElementById('btn');
+            btn.disabled = true; btn.innerText = "Working...";
+
+            try {
+                const res = await fetch('/api/process', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({url})
+                });
+                const data = await res.json();
+                
+                if(data.download_url) {
+                    document.getElementById('step1').className = "text-green-400";
+                    document.getElementById('step2').className = "text-green-400";
+                    document.getElementById('step3').className = "text-green-400";
+                    alert("Success! Your video is ready.");
+                    window.location.href = data.download_url;
+                } else {
+                    alert("Error: " + data.error);
+                }
+            } catch(e) {
+                alert("Server Connection Failed.");
+            } finally {
+                btn.disabled = false; btn.innerText = "Download";
+            }
+        }
+    </script>
+</body>
+</html>
