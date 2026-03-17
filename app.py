@@ -1,5 +1,6 @@
 import os
 import requests
+import re
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
@@ -19,35 +20,38 @@ def process_video():
     if not sora_url:
         return jsonify({"error": "No URL provided"}), 400
 
-    # These are the magic settings you need in 2026 to beat Sora's security
     params = {
         'url': sora_url,
         'apikey': ZENROWS_API_KEY,
-        'js_render': 'true',        # Runs Javascript to load the video player
-        'premium_proxy': 'true',     # Uses a home IP to avoid being blocked
-        'antibot': 'true',           # Automatically solves 'I am human' checks
-        'wait_for': 'video'          # Waits until the video actually appears
+        'js_render': 'true',
+        'premium_proxy': 'true',
+        'antibot': 'true',
+        'wait_for': 'video',          # Wait for the player
+        'wait_browser': 'networkidle' # Wait for the video to start loading
     }
 
     try:
-        # We tell ZenRows to go get the page for us
-        response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=30)
-        html_content = response.text
+        # We increase timeout to 60 because Sora is slow to load
+        response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=60)
+        html = response.text
         
-        # We look for the video source in the code ZenRows sent back
-        # Sora video links usually start with 'https://' and end with '.mp4'
-        if 'src="' in html_content:
-            # This is a simple way to pull the URL out of the HTML tags
-            parts = html_content.split('src="')
-            for p in parts:
-                if 'https://' in p and '.mp4' in p:
-                    video_url = p.split('"')[0]
-                    return jsonify({"status": "success", "download_url": video_url})
+        # --- IMPROVED SEARCHING ---
+        # We look for ANY .mp4 link that looks like it belongs to OpenAI/Sora
+        # This covers almost all the different link formats Sora uses.
+        links = re.findall(r'(https?://[^\s"]+sora[^\s"]+\.mp4[^\s"]*)', html)
         
-        return jsonify({"error": "Could not find video. Try a different Sora link."}), 404
+        if not links:
+            # Fallback: Look for any high-quality mp4 link
+            links = re.findall(r'(https?://[^\s"]+\.mp4[^\s"]*)', html)
+
+        if links:
+            # We found it! We take the first one found.
+            return jsonify({"status": "success", "download_url": links[0]})
+        
+        return jsonify({"error": "Sora is being stubborn. Try the link again in a moment."}), 404
 
     except Exception as e:
-        return jsonify({"error": "Connection to ZenRows failed."}), 500
+        return jsonify({"error": "ZenRows timed out. Sora's servers might be busy."}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
