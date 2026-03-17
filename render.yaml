@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: sora-cleaner-final
+    name: soraclean-app
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
