@@ -2,10 +2,12 @@ import os
 import requests
 import re
 from flask import Flask, render_template, request, jsonify
+from flask_cors import CORS
 
 app = Flask(__name__)
+CORS(app)
 
-# Your ZenRows API Key
+# Your exact ZenRows API Key
 ZENROWS_API_KEY = "97a3341face7698dd0dccb24b16e385f0d826033"
 
 @app.route('/')
@@ -14,44 +16,47 @@ def index():
 
 @app.route('/api/process', methods=['POST'])
 def process_video():
-    data = request.json
-    sora_url = data.get('url')
+    sora_url = request.json.get('url')
     
     if not sora_url:
         return jsonify({"error": "No URL provided"}), 400
 
+    # ZenRows Bypass Settings
     params = {
         'url': sora_url,
         'apikey': ZENROWS_API_KEY,
         'js_render': 'true',
         'premium_proxy': 'true',
         'antibot': 'true',
-        'wait_for': 'video',          # Wait for the player
-        'wait_browser': 'networkidle' # Wait for the video to start loading
+        'wait': '8000' # Wait 8 solid seconds for OpenAI to load the video in the background
     }
 
     try:
-        # We increase timeout to 60 because Sora is slow to load
+        # Increase timeout to 60s because ZenRows takes time to solve Cloudflare
         response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=60)
         html = response.text
         
-        # --- IMPROVED SEARCHING ---
-        # We look for ANY .mp4 link that looks like it belongs to OpenAI/Sora
-        # This covers almost all the different link formats Sora uses.
-        links = re.findall(r'(https?://[^\s"]+sora[^\s"]+\.mp4[^\s"]*)', html)
-        
-        if not links:
-            # Fallback: Look for any high-quality mp4 link
-            links = re.findall(r'(https?://[^\s"]+\.mp4[^\s"]*)', html)
+        print(f"DEBUG: Scraped {len(html)} characters from Sora.")
 
-        if links:
-            # We found it! We take the first one found.
-            return jsonify({"status": "success", "download_url": links[0]})
+        # AGGRESSIVE DEEP SEARCH: Look for ANY link ending in .mp4
+        # This catches hidden JSON data, React states, and standard HTML tags
+        all_mp4_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]+\.mp4[^\s"\'<>\[\]\{\}]*)', html)
         
-        return jsonify({"error": "Sora is being stubborn. Try the link again in a moment."}), 404
+        if all_mp4_links:
+            # We filter for links that belong to OpenAI's actual storage servers
+            openai_links = [link for link in all_mp4_links if "oaiusercontent" in link or "openai" in link or "sora" in link]
+            
+            if openai_links:
+                # Give back the most secure OpenAI link found
+                return jsonify({"status": "success", "download_url": openai_links[0]})
+            else:
+                # If no OpenAI specific link, just give the first mp4 we found
+                return jsonify({"status": "success", "download_url": all_mp4_links[0]})
+
+        return jsonify({"error": "Bypassed successfully, but OpenAI hid the video file too deep."}), 404
 
     except Exception as e:
-        return jsonify({"error": "ZenRows timed out. Sora's servers might be busy."}), 500
+        return jsonify({"error": f"Server timeout or error: {str(e)}"}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
