@@ -41,94 +41,67 @@ def process_video():
     }
 
     try:
-        # 1. SCRAPE THE LINKS
+        # 1. SCRAPE & CLEAN
         response = requests.get('https://api.zenrows.com/v1/', params=params, timeout=60)
         clean_html = response.text.replace('\\/', '/')
         all_links = re.findall(r'(https?://[^\s"\'<>\[\]\{\}]+)', clean_html)
         
-        # 2. BULLETPROOF VIDEO FILTER
-        secure_video_links = []
-        for link in all_links:
-            if ('sig=' in link and 'se=' in link) or '.mp4' in link or '.m3u8' in link:
-                if 'thumbnail' not in link.lower() and 'poster' not in link.lower() and '.jpg' not in link.lower() and '.png' not in link.lower():
-                    secure_video_links.append(link)
+        secure_video_links = [l for l in all_links if ('sig=' in l and 'se=' in l) or '.mp4' in l or '.m3u8' in l]
+        secure_video_links = [l for l in secure_video_links if 'thumbnail' not in l.lower() and '.jpg' not in l.lower()]
 
         if not secure_video_links:
-            return jsonify({"error": "Bypassed successfully, but the video link was totally hidden."}), 404
+            return jsonify({"error": "Video link hidden."}), 404
 
-        best_link = max(secure_video_links, key=len)
-
-        # THE SLEDGEHAMMER: Aggressively decode the final URL
-        best_link = html.unescape(best_link)
+        best_link = html.unescape(max(secure_video_links, key=len))
         while "&amp;" in best_link or "\\u0026" in best_link:
             best_link = best_link.replace("\\u0026", "&").replace("&amp;", "&")
-        
-        # Strip trailing garbage characters just in case regex grabbed too much
-        best_link = best_link.strip("\\'\"<>[]{}()") 
-        print(f"DEBUG: Cleaned Target URL -> {best_link[:100]}...")
+        best_link = best_link.strip("\\'\"<>[]{}()")
 
-        # 3. DIRECT STREAM TO FFMPEG
-        clean_filename = f"clean_{uuid.uuid4().hex}.mp4"
-        clean_path = os.path.join(TEMP_DIR, clean_filename)
+        # 2. RESOLUTION DETECTION
         ffmpeg_exe = "ffmpeg"
-        
-        print("DEBUG: Probing video resolution directly from URL...")
-        # Add User-Agent to probe as well
         probe = subprocess.run([
-            "ffprobe", 
-            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "-i", best_link
+            "ffprobe", "-user_agent", "Mozilla/5.0", "-i", best_link
         ], stderr=subprocess.PIPE, text=True)
         
         res_match = re.search(r'Video:.*?\s(\d+)x(\d+)', probe.stderr)
+        V_W, V_H = (int(res_match.group(1)), int(res_match.group(2))) if res_match else (1080, 1920)
 
-        if res_match:
-            V_W, V_H = int(res_match.group(1)), int(res_match.group(2))
-            print(f"DEBUG: Resolution detected as {V_W}x{V_H}")
-        else:
-            V_W, V_H = 1080, 1920 
-            print("DEBUG: Resolution scan failed, defaulting to 1080x1920")
+        # 3. DYNAMIC BOX & SAFETY CLAMP
+        box_w = int(V_W * 0.35)
+        box_h = int(V_H * 0.10)
 
-        box_w = int(V_W * 0.30)
-        box_h = int(V_H * 0.08)
+        def clamp_x(val): return max(0, min(val, V_W - box_w - 5))
+        def clamp_y(val): return max(0, min(val, V_H - box_h - 5))
 
-        # The Coordinates Map
-        bl_x, bl_y = int(V_W * 0.05), int(V_H * 0.88)
-        mr_x, mr_y = int(V_W * 0.65), int(V_H * 0.45)
-        tl_x, tl_y = int(V_W * 0.05), int(V_H * 0.05)
-        br_x, br_y = int(V_W * 0.65), int(V_H * 0.88)
-
-        mr_x = min(mr_x, V_W - box_w - 2)
-        br_x = min(br_x, V_W - box_w - 2)
+        # Calculate Coordinates
+        coords = {
+            "bl": (clamp_x(int(V_W * 0.05)), clamp_y(int(V_H * 0.85))), # 0-4s
+            "mr": (clamp_x(int(V_W * 0.60)), clamp_y(int(V_H * 0.45))), # 4-8s
+            "tl": (clamp_x(int(V_W * 0.05)), clamp_y(int(V_H * 0.05))), # 8-12s
+            "br": (clamp_x(int(V_W * 0.60)), clamp_y(int(V_H * 0.85)))  # 12-15s
+        }
 
         filter_complex = (
-            f"[0:v]delogo=x={bl_x}:y={bl_y}:w={box_w}:h={box_h}:enable='between(t,0,4)'[v1];"
-            f"[v1]delogo=x={mr_x}:y={mr_y}:w={box_w}:h={box_h}:enable='between(t,4,8)'[v2];"
-            f"[v2]delogo=x={tl_x}:y={tl_y}:w={box_w}:h={box_h}:enable='between(t,8,12)'[v3];"
-            f"[v3]delogo=x={br_x}:y={br_y}:w={box_w}:h={box_h}:enable='between(t,12,15)'"
+            f"[0:v]delogo=x={coords['bl'][0]}:y={coords['bl'][1]}:w={box_w}:h={box_h}:enable='between(t,0,4)'[v1];"
+            f"[v1]delogo=x={coords['mr'][0]}:y={coords['mr'][1]}:w={box_w}:h={box_h}:enable='between(t,4,8)'[v2];"
+            f"[v2]delogo=x={coords['tl'][0]}:y={coords['tl'][1]}:w={box_w}:h={box_h}:enable='between(t,8,12)'[v3];"
+            f"[v3]delogo=x={coords['br'][0]}:y={coords['br'][1]}:w={box_w}:h={box_h}:enable='between(t,12,15)'"
         )
 
+        # 4. EXECUTE
+        clean_filename = f"clean_{uuid.uuid4().hex}.mp4"
+        clean_path = os.path.join(TEMP_DIR, clean_filename)
+        
         command = [
-            ffmpeg_exe, "-y", 
-            "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "-i", best_link,
-            "-filter_complex", filter_complex,
-            "-c:a", "copy",
-            "-preset", "ultrafast",
-            clean_path
+            ffmpeg_exe, "-y", "-user_agent", "Mozilla/5.0", "-i", best_link,
+            "-filter_complex", filter_complex, "-c:a", "copy", "-preset", "ultrafast", clean_path
         ]
 
-        print("DEBUG: Streaming and applying dynamic blur via FFmpeg...")
         subprocess.run(command, check=True)
-
-        # 4. SEND TO USER
         return jsonify({"status": "success", "download_url": f"/download/{clean_filename}"})
 
-    except subprocess.CalledProcessError as e:
-        return jsonify({"error": "FFmpeg Engine Failed. The video link might be dead or heavily encrypted."}), 500
     except Exception as e:
-        return jsonify({"error": f"Server Error: {str(e)}"}), 500
+        return jsonify({"error": f"Process Failed: {str(e)}"}), 500
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
